@@ -1,2 +1,290 @@
 # d_Managing-Database-Instance_Shutting_down
 d_Managing-Database-Instance_Shutting_down
+
+
+
+Oracle - Managing the Database Instance Shutting Down
+-----------------------------------------------------
+- Shutdown modes:	
+	• I = IMMEDIATE
+	• T = TRANSACTIONAL
+	• A = ABORT
+	• N = NORMAL
+	
+	• N = NORMAL:
+		A normal database shutdown proceeds with the following conditions:
+
+		• No new connections can be made.
+
+		• The Oracle server waits for all users to disconnect before completing the shutdown.
+
+		• Database and redo buffers are written to disk.
+
+		• Background processes are terminated and the SGA is removed from memory.
+
+		• The Oracle server closes and dismounts the database before shutting down the instance.
+
+		• The next startup does not require an instance recovery.
+		
+	To expain the normal shutdown, let's follow the below example...
+	-Open the Tracing 
+	[oracle@dba167 ~]$ tail -200f /u01/app/oracle/diag/rdbms/dba167/dba167/trace/alert_dba167.log
+
+	-connect user a
+	SQL> conn a/a
+	Connected.
+	SQL> show user
+	USER is "A"
+	
+	-shutdown
+	SQL> shutdown
+
+	Note: Shutdown is in progress, This is because user session exist for user a
+	
+	-If we try to connect a new session by a user it will show below messages..
+	SQL> conn b/b
+	ERROR:
+	ORA-01090: shutdown in progress - connection is not                                                                                        permitted
+	Process ID: 0
+	Session ID: 0 Serial number: 0
+
+
+	Warning: You are no longer connected to ORACLE.
+
+	
+	-Disconnect user a
+	SQL> disconn
+	Disconnected from Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production
+	Version 19.3.0.0.0
+	
+	-Then we will see the trace file logs for shutting down status and also in shutdown progress status..
+	SQL> shutdown
+	Database closed.
+	Database dismounted.
+	ORACLE instance shut down.
+	
+	• I = IMMEDIATE:
+		A shutdown in IMMEDIATE mode proceeds with the following conditions:
+		• Current SQL statements being processed by the Oracle database are not completed.
+		
+		• The Oracle server does not wait for the users who are currently connected to the The Oracle server does not wait for the users 
+		  who are currently connected to the database to disconnect.
+		
+		• The Oracle server rolls back active transactions and disconnects all connected users.
+		
+		• The Oracle server closes and dismounts the database before shutting down the instance.
+		
+		• The next startup does not require an instance recovery.
+		
+	-Connect with sys user and perform the following tasks...
+	SQL> conn sys/sys123 as sysdba
+	Connected.
+	
+	SQL> grant resource to a;
+
+	Grant succeeded.
+
+	SQL> grant create table to a;
+
+	Grant succeeded.
+	
+	SQL> ALTER USER a QUOTA 100M ON users;
+
+	User altered.
+
+	SQL> GRANT UNLIMITED TABLESPACE TO a;
+
+	Grant succeeded.
+	
+	-Let's connect and create a new table to user a
+	SQL> conn a/a;
+	Connected.
+	SQL> create table testtab(id number, name varchar2(50)) tablespace users;
+
+	Table created.
+
+	
+	-insert data into testtab
+begin
+
+for i in 1..9999999 loop
+	insert into testtab values(i,'Test Data...'||i);
+end loop;
+commit;
+end;
+/
+	-now shutdown immediate and connect with user a and check table data
+	SQL> shutdown immediate
+	SQL> startup
+
+	SQL> conn a/a;
+	Connected.
+	SQL> select *from testtab;
+
+	no rows selected
+	
+	-Note: Inserted data rolled back on immediate shutdown.	
+
+
+	• T = TRANSACTIONAL:
+		A transactional database shutdown proceeds with the following conditions:
+		• No client can start a new transaction on this particular instance.
+		
+		• A client is disconnected when the client ends the transaction that is in progress.
+		
+		• When all transactions have been completed, a shutdown occurs immediately.
+		
+		• The next startup does not require an instance recovery
+
+		-insert data into testtab with big amount
+begin
+
+for i in 1..9999999 loop
+	insert into testtab values(i,'Test Data...'||i);
+end loop;
+commit;
+end;
+/
+
+-shutdown transactional
+	SQL> shutdown transactional
+	Database closed.
+	Database dismounted.
+	ORACLE instance shut down.
+
+	
+	
+-restart database
+	
+SQL> startup
+	ORACLE instance started.
+
+Total System Global Area 4294963272 bytes
+	Fixed Size                  8904776 bytes
+	Variable Size            2365587456 bytes
+	Database Buffers         1912602624 bytes
+	Redo Buffers                7868416 bytes
+	Database mounted.
+	Database opened.
+	
+	
+SQL> conn a/a;
+	Connected.
+	SQL> select count(*) from testtab;
+
+
+COUNT(*)
+	----------
+		 999999
+		 
+		 
+		 
+-A = ABORT:
+	  =>Performs the least amount of work before shutting down
+		
+    =>Only down the instance but not database
+		
+		=>No checkpoint happens
+		
+		=>No new connection allowed.
+		
+		=>Not waiting until current session end
+		
+		=>Not waiting until current transctions end
+				
+		=>Requires recovery before startup by SMON,
+		  this is because if there any transctions those are not writen to datafile.
+		  
+		=>Database and redo buffers are not written to disk.
+		
+		=>Uncommitted transactions are not rolled back.
+		
+		=>The instance is terminated without closing the files.
+		
+		=>The database is not closed or dismounted.
+	    
+		=>you need to shut down immediately because of an impending situation 
+		  such as notice of a power outage within seconds, earthquake, firesituation.
+		  
+-LET'S DONW THE DATABASE
+	
+-conn a
+	SQL> conn a/a
+	Connected.
+	SQL> select *from user_tables;
+
+-shutdown abort
+SQL> shutdown abort
+	ORACLE instance shut down.
+	
+-Now try to execute any query
+SQL> SELECT *FROM USER_TABLES;
+	SELECT *FROM USER_TABLES
+				 *
+	ERROR at line 1:
+	ORA-03135: connection lost contact
+	Process ID: 8274
+	Session ID: 288 Serial number: 13365
+	
+-Another Example to insert data into table
+		
+-truncate table testtab
+SQL> truncate table testtab;
+
+Table truncated.	
+	
+-Let's insert into table testtab
+begin
+
+for i in 1..9999999 loop
+	insert into testtab values(i,'Test Data...'||i);
+	commit;
+end loop;
+end;
+/
+
+	-lets shutdown abort
+SQL> shutdown abort
+	-only instance shutdown
+	
+	-lets restart
+SQL> startup
+	
+	-reconnet to user a
+SQL> conn a/a;
+	Connected.
+	SQL> select count(*) from testtab;
+
+	  COUNT(*)
+	----------
+		402028
+
+	
+		 
+	#####shutdown follows	
+  Database closed.
+	Database dismounted.
+	ORACLE instance shut down.
+	
+	
+	-if we have configured the grid then the server control statement can be used to shutdown
+	-to check status of the database. first we need to connect with oracle user to a new session
+	[oracle@dba167 ~]$ srvctl status database -d dba167;
+ Database is running.
+	
+	-to stop  the databse 
+ [oracle@dba167 ~]$ srvctl stop database -d dba167;
+
+	-to check status  the databse 
+  [oracle@dba167 ~]$ srvctl status database -d dba167;
+	Database is not running.
+	
+	-to start the databse 
+ [oracle@dba167 ~]$ srvctl start database -d dba167;
+	
+	-to check status  the databse 
+[oracle@dba167 ~]$ srvctl status database -d dba167;
+	Database is running.
+	
+
+
